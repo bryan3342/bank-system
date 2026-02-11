@@ -5,9 +5,11 @@ import { getCurrentUser } from '@/lib/auth'
 // GET /api/events/[id]/attendees - Get current attendees and their earnings
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -15,7 +17,7 @@ export async function GET(
 
     // Get event
     const event = await db.event.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!event) {
@@ -41,7 +43,7 @@ export async function GET(
 
     // Get all checkins for this event
     const checkins = await db.eventCheckin.findMany({
-      where: { eventId: params.id },
+      where: { eventId: id },
       include: {
         user: {
           select: {

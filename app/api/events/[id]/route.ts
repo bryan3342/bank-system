@@ -19,16 +19,18 @@ const updateEventSchema = z.object({
 // GET /api/events/[id] - Get event details
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
     const event = await db.event.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         group: {
           select: { id: true, name: true, currencyRate: true, minAttendance: true },
@@ -71,7 +73,7 @@ export async function GET(
     const myCheckin = await db.eventCheckin.findUnique({
       where: {
         eventId_userId: {
-          eventId: params.id,
+          eventId: id,
           userId: user.id,
         },
       },
@@ -105,16 +107,18 @@ export async function GET(
 // PATCH /api/events/[id] - Update event (admin only, only if scheduled)
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
     const event = await db.event.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!event) {
@@ -170,7 +174,7 @@ export async function PATCH(
     if (data.currencyRate) updateData.currencyRate = data.currencyRate
 
     const updated = await db.event.update({
-      where: { id: params.id },
+      where: { id },
       data: updateData,
     })
 
@@ -187,16 +191,18 @@ export async function PATCH(
 // DELETE /api/events/[id] - Cancel event (admin only)
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
     const event = await db.event.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!event) {
@@ -229,7 +235,7 @@ export async function DELETE(
     }
 
     await db.event.update({
-      where: { id: params.id },
+      where: { id },
       data: { status: 'cancelled' },
     })
 

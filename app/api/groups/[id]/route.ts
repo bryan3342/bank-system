@@ -14,16 +14,17 @@ const updateGroupSchema = z.object({
 // GET /api/groups/[id] - Get group details
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
     const group = await db.group.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         owner: {
           select: { id: true, name: true, email: true },
@@ -42,7 +43,7 @@ export async function GET(
     const membership = await db.groupMember.findUnique({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },
@@ -75,9 +76,10 @@ export async function GET(
 // PATCH /api/groups/[id] - Update group settings (admin only)
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -87,7 +89,7 @@ export async function PATCH(
     const membership = await db.groupMember.findUnique({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },
@@ -111,7 +113,7 @@ export async function PATCH(
     }
 
     const group = await db.group.update({
-      where: { id: params.id },
+      where: { id },
       data: result.data,
     })
 

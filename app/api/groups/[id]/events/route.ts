@@ -19,9 +19,10 @@ const createEventSchema = z.object({
 // POST /api/groups/[id]/events - Create an event (admin only)
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -31,7 +32,7 @@ export async function POST(
     const membership = await db.groupMember.findUnique({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },
@@ -70,7 +71,7 @@ export async function POST(
     // Create the event
     const event = await db.event.create({
       data: {
-        groupId: params.id,
+        groupId: id,
         name: data.name,
         description: data.description,
         latitude: data.latitude,
@@ -97,9 +98,10 @@ export async function POST(
 // GET /api/groups/[id]/events - List group events
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -109,7 +111,7 @@ export async function GET(
     const membership = await db.groupMember.findUnique({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },
@@ -128,7 +130,7 @@ export async function GET(
     const upcoming = searchParams.get('upcoming') === 'true'
 
     // Build query
-    const where: any = { groupId: params.id }
+    const where: any = { groupId: id }
 
     if (status) {
       where.status = status

@@ -10,9 +10,10 @@ const joinSchema = z.object({
 // POST /api/groups/[id]/join - Join a group using invite code
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -32,7 +33,7 @@ export async function POST(
 
     // Find the group and verify invite code
     const group = await db.group.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!group) {
@@ -50,7 +51,7 @@ export async function POST(
     const existingMembership = await db.groupMember.findUnique({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },
@@ -66,7 +67,7 @@ export async function POST(
     // Add user as member
     await db.groupMember.create({
       data: {
-        groupId: params.id,
+        groupId: id,
         userId: user.id,
         role: 'member',
       },

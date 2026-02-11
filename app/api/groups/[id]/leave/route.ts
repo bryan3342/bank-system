@@ -5,9 +5,10 @@ import { getCurrentUser } from '@/lib/auth'
 // DELETE /api/groups/[id]/leave - Leave a group
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -17,7 +18,7 @@ export async function DELETE(
     const membership = await db.groupMember.findUnique({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },
@@ -42,7 +43,7 @@ export async function DELETE(
     await db.groupMember.delete({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },

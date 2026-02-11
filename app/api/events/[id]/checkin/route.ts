@@ -12,9 +12,11 @@ const checkinSchema = z.object({
 // POST /api/events/[id]/checkin - Check in to an event
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -34,7 +36,7 @@ export async function POST(
 
     // Get event details
     const event = await db.event.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         group: {
           select: { minAttendance: true },
@@ -75,7 +77,7 @@ export async function POST(
     const existingCheckin = await db.eventCheckin.findUnique({
       where: {
         eventId_userId: {
-          eventId: params.id,
+          eventId: id,
           userId: user.id,
         },
       },
@@ -100,7 +102,7 @@ export async function POST(
     // Create check-in record
     const checkin = await db.eventCheckin.create({
       data: {
-        eventId: params.id,
+        eventId: id,
         userId: user.id,
         isWithinRadius: withinRadius,
         lastLocationPing: new Date(),
@@ -111,7 +113,7 @@ export async function POST(
     if (withinRadius && event.status === 'active') {
       const activeCount = await db.eventCheckin.count({
         where: {
-          eventId: params.id,
+          eventId: id,
           isWithinRadius: true,
         },
       })
@@ -120,7 +122,7 @@ export async function POST(
 
       if (activeCount >= threshold) {
         await db.event.update({
-          where: { id: params.id },
+          where: { id },
           data: {
             status: 'confirmed',
             confirmedAt: new Date(),

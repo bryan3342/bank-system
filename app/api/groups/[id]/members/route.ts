@@ -5,9 +5,10 @@ import { getCurrentUser } from '@/lib/auth'
 // GET /api/groups/[id]/members - List members of a group
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -17,7 +18,7 @@ export async function GET(
     const membership = await db.groupMember.findUnique({
       where: {
         groupId_userId: {
-          groupId: params.id,
+          groupId: id,
           userId: user.id,
         },
       },
@@ -32,7 +33,7 @@ export async function GET(
 
     // Get all members
     const members = await db.groupMember.findMany({
-      where: { groupId: params.id },
+      where: { groupId: id },
       include: {
         user: {
           select: {
