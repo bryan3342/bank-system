@@ -5,6 +5,11 @@ import { signOut, useSession } from 'next-auth/react'
 import dynamic from 'next/dynamic'
 import { useGeolocation } from './useGeolocation'
 import { useNearbyUsers } from './useNearbyUsers'
+import LiveEarningRate from './widgets/LiveEarningRate'
+import EarningStreak from './widgets/EarningStreak'
+import EarningsSummary from './widgets/EarningsSummary'
+import Leaderboard from './widgets/Leaderboard'
+import ActiveMembers from './widgets/ActiveMembers'
 
 const MapView = dynamic(() => import('./MapView'), { ssr: false })
 
@@ -34,6 +39,30 @@ interface CookieClubData {
   }
   status: 'member' | 'pending' | 'denied' | 'none'
   role: string | null
+}
+
+interface DashboardStats {
+  earnings: {
+    today: number
+    thisWeek: number
+    allTime: number
+    dailyHistory: number[]
+  }
+  streak: {
+    days: number
+    isActiveToday: boolean
+  }
+  leaderboard: Array<{
+    userId: string
+    name: string
+    totalEarned: number
+    rank: number
+  }>
+  activeMembers: Array<{
+    userId: string
+    name: string
+    lastSeenAt: string
+  }>
 }
 
 function friendlyType(type: string): string {
@@ -78,6 +107,7 @@ export default function DashboardPage() {
   const [balance, setBalance] = useState<number | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [cookieClub, setCookieClub] = useState<CookieClubData | null>(null)
+  const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [requesting, setRequesting] = useState(false)
 
@@ -86,14 +116,16 @@ export default function DashboardPage() {
       fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)),
       fetch('/api/wallet').then((r) => (r.ok ? r.json() : null)),
       fetch('/api/groups/cookie-club').then((r) => (r.ok ? r.json() : null)),
+      fetch('/api/dashboard/stats').then((r) => (r.ok ? r.json() : null)),
     ])
-      .then(([meData, walletData, clubData]) => {
+      .then(([meData, walletData, clubData, statsData]) => {
         if (meData) setProfile(meData.user)
         if (walletData) {
           setBalance(walletData.balance)
           setTransactions(walletData.recentTransactions)
         }
         if (clubData) setCookieClub(clubData)
+        if (statsData) setStats(statsData)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -147,7 +179,7 @@ export default function DashboardPage() {
       {/* Widget grid */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Map widget — spans 2 columns on desktop */}
+          {/* Row 1: Map + Balance */}
           <div className="lg:col-span-2 bg-surface-800 rounded-xl border border-surface-600 overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-surface-600">
               <h2 className="text-sm font-medium text-gray-400">Nearby</h2>
@@ -167,7 +199,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Balance widget */}
           <div className="bg-surface-800 rounded-xl border border-surface-600 p-5">
             <h2 className="text-sm font-medium text-gray-400 mb-4">Balance</h2>
             {loading ? (
@@ -182,7 +213,6 @@ export default function DashboardPage() {
                 </p>
                 <p className="text-xs text-gray-500 mt-1">Available Grubs</p>
 
-                {/* Profile summary */}
                 {profile && (
                   <div className="mt-5 pt-4 border-t border-surface-600 flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center flex-shrink-0">
@@ -207,7 +237,84 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Cookie Club widget */}
+          {/* Row 2: Earnings row */}
+          <LiveEarningRate isNearOthers={isNearOthers} />
+
+          <EarningStreak
+            days={stats?.streak.days ?? 0}
+            isActiveToday={stats?.streak.isActiveToday ?? false}
+            dailyHistory={stats?.earnings.dailyHistory ?? []}
+            loading={loading}
+          />
+
+          <EarningsSummary
+            today={stats?.earnings.today ?? 0}
+            thisWeek={stats?.earnings.thisWeek ?? 0}
+            allTime={stats?.earnings.allTime ?? 0}
+            dailyHistory={stats?.earnings.dailyHistory ?? []}
+            loading={loading}
+          />
+
+          {/* Row 3: Recent Activity + Leaderboard */}
+          <div className="lg:col-span-2 bg-surface-800 rounded-xl border border-surface-600 p-5">
+            <h2 className="text-sm font-medium text-gray-400 mb-3">
+              Recent Activity
+            </h2>
+            {loading ? (
+              <div className="space-y-2">
+                {[1, 2, 3, 4].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : transactions.length === 0 ? (
+              <p className="text-gray-500 text-sm">No activity yet</p>
+            ) : (
+              <div className="space-y-1">
+                {transactions.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-surface-700/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          tx.amount >= 0
+                            ? 'bg-brand-500/15 text-brand-400'
+                            : 'bg-red-500/15 text-red-400'
+                        }`}
+                      >
+                        <span className="text-xs font-bold">
+                          {tx.amount >= 0 ? '+' : '-'}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-sm">{friendlyType(tx.type)}</p>
+                        <p className="text-xs text-gray-500">
+                          {formatDateTime(tx.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <p
+                      className={`text-sm font-medium ${
+                        tx.amount >= 0 ? 'text-brand-400' : 'text-red-400'
+                      }`}
+                    >
+                      {tx.amount >= 0 ? '+' : ''}
+                      {tx.amount.toFixed(2)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Leaderboard
+            entries={stats?.leaderboard ?? []}
+            currentUserId={profile?.id ?? ''}
+            loading={loading}
+          />
+
+          {/* Row 4: Cookie Club + Active Members */}
           <div className="bg-surface-800 rounded-xl border border-surface-600 p-5">
             <h2 className="text-sm font-medium text-gray-400 mb-3">Cookie Club</h2>
             {loading ? (
@@ -261,58 +368,10 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Recent Activity widget — spans 2 columns on desktop */}
-          <div className="lg:col-span-2 bg-surface-800 rounded-xl border border-surface-600 p-5">
-            <h2 className="text-sm font-medium text-gray-400 mb-3">
-              Recent Activity
-            </h2>
-            {loading ? (
-              <div className="space-y-2">
-                {[1, 2, 3, 4].map((i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
-              </div>
-            ) : transactions.length === 0 ? (
-              <p className="text-gray-500 text-sm">No activity yet</p>
-            ) : (
-              <div className="space-y-1">
-                {transactions.map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-surface-700/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                          tx.amount >= 0
-                            ? 'bg-brand-500/15 text-brand-400'
-                            : 'bg-red-500/15 text-red-400'
-                        }`}
-                      >
-                        <span className="text-xs font-bold">
-                          {tx.amount >= 0 ? '+' : '-'}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="text-sm">{friendlyType(tx.type)}</p>
-                        <p className="text-xs text-gray-500">
-                          {formatDateTime(tx.createdAt)}
-                        </p>
-                      </div>
-                    </div>
-                    <p
-                      className={`text-sm font-medium ${
-                        tx.amount >= 0 ? 'text-brand-400' : 'text-red-400'
-                      }`}
-                    >
-                      {tx.amount >= 0 ? '+' : ''}
-                      {tx.amount.toFixed(2)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <ActiveMembers
+            members={stats?.activeMembers ?? []}
+            loading={loading}
+          />
         </div>
       </main>
     </div>
