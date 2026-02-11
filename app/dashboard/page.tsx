@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { signOut, useSession } from 'next-auth/react'
+import dynamic from 'next/dynamic'
+import { useGeolocation } from './useGeolocation'
+import { useNearbyUsers } from './useNearbyUsers'
+
+const MapView = dynamic(() => import('./MapView'), { ssr: false })
 
 interface Profile {
   id: string
@@ -20,60 +25,44 @@ interface Transaction {
   createdAt: string
 }
 
-interface Event {
-  id: string
-  name: string
-  description: string | null
-  startsAt: string
-  endsAt: string
-  status: string
-  attendeeCount: number
-  groupId: string
+interface CookieClubData {
+  group: {
+    id: string
+    name: string
+    description: string | null
+    memberCount: number
+  }
+  status: 'member' | 'pending' | 'denied' | 'none'
+  role: string | null
 }
 
-interface Group {
-  id: string
-  name: string
-  memberCount: number
-  myRole: string
+function friendlyType(type: string): string {
+  const map: Record<string, string> = {
+    proximity_earning: 'Earned near friends',
+    event_earning: 'Earned at event',
+    stock_buy: 'Stock purchase',
+    stock_sell: 'Stock sale',
+    transfer: 'Transfer',
+    adjustment: 'Adjustment',
+  }
+  return map[type] || type.replace(/_/g, ' ')
 }
 
-const txTypeStyles: Record<string, string> = {
-  checkin_reward: 'bg-brand-500/20 text-brand-400',
-  event_payout: 'bg-brand-500/20 text-brand-400',
-  trade_buy: 'bg-red-500/20 text-red-400',
-  trade_sell: 'bg-blue-500/20 text-blue-400',
-  transfer_in: 'bg-brand-500/20 text-brand-400',
-  transfer_out: 'bg-orange-500/20 text-orange-400',
-}
-
-const eventStatusStyles: Record<string, string> = {
-  scheduled: 'bg-blue-500/20 text-blue-400',
-  active: 'bg-brand-500/20 text-brand-400',
-  confirmed: 'bg-purple-500/20 text-purple-400',
-  ended: 'bg-gray-500/20 text-gray-400',
-  cancelled: 'bg-red-500/20 text-red-400',
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-US', {
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
   })
 }
 
-function formatDateTime(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-US', {
+function formatDateTime(d: string) {
+  return new Date(d).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   })
-}
-
-function formatTxType(type: string) {
-  return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 function Skeleton({ className = '' }: { className?: string }) {
@@ -82,68 +71,68 @@ function Skeleton({ className = '' }: { className?: string }) {
 
 export default function DashboardPage() {
   const { data: session } = useSession()
+  const { latitude, longitude, error: geoError, isNearOthers } = useGeolocation()
+  const { nearbyUsers } = useNearbyUsers()
+
   const [profile, setProfile] = useState<Profile | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [groups, setGroups] = useState<Group[]>([])
-  const [events, setEvents] = useState<Event[]>([])
+  const [cookieClub, setCookieClub] = useState<CookieClubData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [requesting, setRequesting] = useState(false)
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [meRes, walletRes, groupsRes] = await Promise.all([
-          fetch('/api/auth/me'),
-          fetch('/api/wallet'),
-          fetch('/api/groups'),
-        ])
-
-        if (meRes.ok) {
-          const meData = await meRes.json()
-          setProfile(meData.user)
-        }
-
-        if (walletRes.ok) {
-          const walletData = await walletRes.json()
+    Promise.all([
+      fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)),
+      fetch('/api/wallet').then((r) => (r.ok ? r.json() : null)),
+      fetch('/api/groups/cookie-club').then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([meData, walletData, clubData]) => {
+        if (meData) setProfile(meData.user)
+        if (walletData) {
           setBalance(walletData.balance)
           setTransactions(walletData.recentTransactions)
         }
-
-        if (groupsRes.ok) {
-          const groupsData = await groupsRes.json()
-          setGroups(groupsData.groups)
-
-          // Fetch upcoming events for each group
-          const eventPromises = groupsData.groups.map((g: Group) =>
-            fetch(`/api/groups/${g.id}/events?upcoming=true`)
-              .then((r) => (r.ok ? r.json() : { events: [] }))
-              .then((data) => data.events)
-          )
-          const allEvents = await Promise.all(eventPromises)
-          const flatEvents = allEvents.flat().sort(
-            (a: Event, b: Event) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
-          )
-          setEvents(flatEvents)
-        }
-      } catch (err) {
-        console.error('Failed to load dashboard data:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchData()
+        if (clubData) setCookieClub(clubData)
+      })
+      .finally(() => setLoading(false))
   }, [])
+
+  async function handleRequestJoin() {
+    if (!cookieClub) return
+    setRequesting(true)
+    try {
+      const res = await fetch(`/api/groups/${cookieClub.group.id}/request`, {
+        method: 'POST',
+      })
+      if (res.ok) {
+        setCookieClub({ ...cookieClub, status: 'pending' })
+      }
+    } catch {
+      // Silent fail
+    } finally {
+      setRequesting(false)
+    }
+  }
 
   return (
     <div className="min-h-screen">
       {/* Header */}
       <header className="border-b border-surface-600 bg-surface-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-brand-400">Gooner Bank</h1>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold text-brand-400">Gooner Bank</h1>
+            {isNearOthers && (
+              <span className="bg-brand-500/20 text-brand-400 text-xs px-3 py-1 rounded-full border border-brand-500/30 animate-pulse">
+                Earning Grubs
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
             {session?.user?.name && (
-              <span className="text-sm text-gray-400 hidden sm:block">{session.user.name}</span>
+              <span className="text-sm text-gray-400 hidden sm:block">
+                {session.user.name}
+              </span>
             )}
             <button
               onClick={() => signOut({ callbackUrl: '/login' })}
@@ -155,132 +144,170 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Content */}
+      {/* Widget grid */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Profile Card */}
-          <div className="bg-surface-800 rounded-xl p-6 border border-surface-600">
-            <h2 className="text-lg font-semibold mb-4">Profile</h2>
-            {loading ? (
-              <div className="space-y-3">
-                <div className="flex justify-center"><Skeleton className="w-16 h-16 rounded-full" /></div>
-                <Skeleton className="h-5 w-32 mx-auto" />
-                <Skeleton className="h-4 w-48 mx-auto" />
-                <Skeleton className="h-4 w-36 mx-auto" />
-              </div>
-            ) : profile ? (
-              <div className="text-center">
-                <div className="w-16 h-16 rounded-full bg-brand-500/20 flex items-center justify-center mx-auto mb-3">
-                  <span className="text-2xl font-bold text-brand-400">
-                    {profile.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
-                  </span>
-                </div>
-                <h3 className="text-lg font-medium">{profile.name}</h3>
-                <p className="text-gray-400 text-sm">{profile.email}</p>
-                <p className="text-gray-500 text-xs mt-2">
-                  Member since {formatDate(profile.createdAt)}
-                </p>
-
-                {groups.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-surface-600">
-                    <h4 className="text-sm font-medium text-gray-400 mb-2">Groups</h4>
-                    <div className="space-y-1">
-                      {groups.map((g) => (
-                        <div key={g.id} className="text-sm flex items-center justify-between">
-                          <span>{g.name}</span>
-                          <span className="text-xs text-gray-500">{g.memberCount} members</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Map widget — spans 2 columns on desktop */}
+          <div className="lg:col-span-2 bg-surface-800 rounded-xl border border-surface-600 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-surface-600">
+              <h2 className="text-sm font-medium text-gray-400">Nearby</h2>
+              <span className="text-xs text-gray-500">
+                {nearbyUsers.length} {nearbyUsers.length === 1 ? 'person' : 'people'} nearby
+                {isNearOthers && (
+                  <span className="text-brand-400 ml-2">+2 Grubs/hr</span>
                 )}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-center">Could not load profile</p>
-            )}
+              </span>
+            </div>
+            <div className="h-[350px] sm:h-[400px]">
+              <MapView
+                center={latitude && longitude ? [latitude, longitude] : null}
+                nearbyUsers={nearbyUsers}
+                geoError={geoError}
+              />
+            </div>
           </div>
 
-          {/* Wallet Card */}
-          <div className="bg-surface-800 rounded-xl p-6 border border-surface-600">
-            <h2 className="text-lg font-semibold mb-4">Wallet</h2>
+          {/* Balance widget */}
+          <div className="bg-surface-800 rounded-xl border border-surface-600 p-5">
+            <h2 className="text-sm font-medium text-gray-400 mb-4">Balance</h2>
             {loading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-10 w-40" />
-                <Skeleton className="h-4 w-24" />
-                <div className="space-y-2 mt-4">
-                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
-                </div>
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-36" />
+                <Skeleton className="h-3 w-24" />
               </div>
             ) : (
               <>
-                <div className="mb-4">
-                  <p className="text-3xl font-bold text-brand-400">
-                    ${balance !== null ? balance.toFixed(2) : '0.00'}
-                  </p>
-                  <p className="text-sm text-gray-500">Available balance</p>
-                </div>
+                <p className="text-4xl font-bold text-brand-400">
+                  ${balance !== null ? balance.toFixed(2) : '0.00'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Available Grubs</p>
 
-                <h3 className="text-sm font-medium text-gray-400 mb-2">Recent Transactions</h3>
-                {transactions.length === 0 ? (
-                  <p className="text-gray-500 text-sm">No transactions yet</p>
-                ) : (
-                  <div className="space-y-2">
-                    {transactions.map((tx) => (
-                      <div
-                        key={tx.id}
-                        className="flex items-center justify-between py-2 border-b border-surface-700 last:border-0"
-                      >
-                        <div>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${txTypeStyles[tx.type] || 'bg-gray-500/20 text-gray-400'}`}>
-                            {formatTxType(tx.type)}
-                          </span>
-                          {tx.description && (
-                            <p className="text-xs text-gray-500 mt-1">{tx.description}</p>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p className={`text-sm font-medium ${tx.amount >= 0 ? 'text-brand-400' : 'text-red-400'}`}>
-                            {tx.amount >= 0 ? '+' : ''}{tx.amount.toFixed(2)}
-                          </p>
-                          <p className="text-xs text-gray-500">{formatDateTime(tx.createdAt)}</p>
-                        </div>
-                      </div>
-                    ))}
+                {/* Profile summary */}
+                {profile && (
+                  <div className="mt-5 pt-4 border-t border-surface-600 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-bold text-brand-400">
+                        {profile.name
+                          .split(' ')
+                          .map((n) => n[0])
+                          .join('')
+                          .toUpperCase()
+                          .slice(0, 2)}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{profile.name}</p>
+                      <p className="text-xs text-gray-500">
+                        Joined {formatDate(profile.createdAt)}
+                      </p>
+                    </div>
                   </div>
                 )}
               </>
             )}
           </div>
 
-          {/* Events Card */}
-          <div className="bg-surface-800 rounded-xl p-6 border border-surface-600">
-            <h2 className="text-lg font-semibold mb-4">Upcoming Events</h2>
+          {/* Cookie Club widget */}
+          <div className="bg-surface-800 rounded-xl border border-surface-600 p-5">
+            <h2 className="text-sm font-medium text-gray-400 mb-3">Cookie Club</h2>
             {loading ? (
               <div className="space-y-2">
-                {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
+                <Skeleton className="h-12 w-full" />
               </div>
-            ) : events.length === 0 ? (
-              <p className="text-gray-500 text-sm">No upcoming events</p>
+            ) : !cookieClub ? (
+              <p className="text-gray-500 text-sm">Group not available</p>
+            ) : cookieClub.status === 'member' ? (
+              <div className="py-2.5 px-3 bg-surface-900 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{cookieClub.group.name}</p>
+                    <p className="text-xs text-gray-500">{cookieClub.role}</p>
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {cookieClub.group.memberCount} {cookieClub.group.memberCount === 1 ? 'member' : 'members'}
+                  </span>
+                </div>
+                {cookieClub.group.description && (
+                  <p className="text-xs text-gray-500 mt-2">{cookieClub.group.description}</p>
+                )}
+              </div>
+            ) : cookieClub.status === 'pending' ? (
+              <div className="py-4 px-3 bg-surface-900 rounded-lg text-center">
+                <p className="text-sm font-medium text-yellow-400">Request Pending</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Waiting for the group owner to approve your request.
+                </p>
+              </div>
+            ) : cookieClub.status === 'denied' ? (
+              <div className="py-4 px-3 bg-surface-900 rounded-lg text-center">
+                <p className="text-sm font-medium text-red-400">Request Denied</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Your request to join was not approved.
+                </p>
+              </div>
             ) : (
-              <div className="space-y-3">
-                {events.map((event) => (
+              <div className="py-4 px-3 bg-surface-900 rounded-lg text-center">
+                <p className="text-sm text-gray-400 mb-3">
+                  Join Cookie Club to start earning Grubs near friends.
+                </p>
+                <button
+                  onClick={handleRequestJoin}
+                  disabled={requesting}
+                  className="px-4 py-2 bg-brand-500 text-black font-medium text-sm rounded-lg hover:bg-brand-400 transition-colors disabled:opacity-50"
+                >
+                  {requesting ? 'Sending...' : 'Request to Join'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Recent Activity widget — spans 2 columns on desktop */}
+          <div className="lg:col-span-2 bg-surface-800 rounded-xl border border-surface-600 p-5">
+            <h2 className="text-sm font-medium text-gray-400 mb-3">
+              Recent Activity
+            </h2>
+            {loading ? (
+              <div className="space-y-2">
+                {[1, 2, 3, 4].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : transactions.length === 0 ? (
+              <p className="text-gray-500 text-sm">No activity yet</p>
+            ) : (
+              <div className="space-y-1">
+                {transactions.map((tx) => (
                   <div
-                    key={event.id}
-                    className="p-3 bg-surface-900 rounded-lg border border-surface-700"
+                    key={tx.id}
+                    className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-surface-700/50 transition-colors"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-sm font-medium">{event.name}</h3>
-                      <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${eventStatusStyles[event.status] || 'bg-gray-500/20 text-gray-400'}`}>
-                        {event.status}
-                      </span>
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          tx.amount >= 0
+                            ? 'bg-brand-500/15 text-brand-400'
+                            : 'bg-red-500/15 text-red-400'
+                        }`}
+                      >
+                        <span className="text-xs font-bold">
+                          {tx.amount >= 0 ? '+' : '-'}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-sm">{friendlyType(tx.type)}</p>
+                        <p className="text-xs text-gray-500">
+                          {formatDateTime(tx.createdAt)}
+                        </p>
+                      </div>
                     </div>
-                    {event.description && (
-                      <p className="text-xs text-gray-500 mt-1">{event.description}</p>
-                    )}
-                    <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-                      <span>{formatDateTime(event.startsAt)}</span>
-                      <span>{event.attendeeCount} attending</span>
-                    </div>
+                    <p
+                      className={`text-sm font-medium ${
+                        tx.amount >= 0 ? 'text-brand-400' : 'text-red-400'
+                      }`}
+                    >
+                      {tx.amount >= 0 ? '+' : ''}
+                      {tx.amount.toFixed(2)}
+                    </p>
                   </div>
                 ))}
               </div>

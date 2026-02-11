@@ -20,13 +20,21 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
+  // Location tracking
+  lastLatitude   Decimal?  @map("last_latitude") @db.Decimal(10, 7)
+  lastLongitude  Decimal?  @map("last_longitude") @db.Decimal(10, 7)
+  lastLocationAt DateTime? @map("last_location_at")
+  isNearOthers   Boolean   @default(false) @map("is_near_others")
+
   // Relations
   ownedGroups    Group[]         @relation("GroupOwner")
   memberships    GroupMember[]
+  joinRequests   JoinRequest[]
   createdEvents  Event[]         @relation("EventCreator")
   checkins       EventCheckin[]
   transactions   Transaction[]
 
+  @@index([lastLocationAt])
   @@map("users")
 }
 
@@ -47,9 +55,10 @@ model Group {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relations
-  owner   User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members GroupMember[]
-  events  Event[]
+  owner        User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members      GroupMember[]
+  joinRequests JoinRequest[]
+  events       Event[]
 
   @@index([inviteCode])
   @@index([ownerId])
@@ -71,6 +80,30 @@ model GroupMember {
   @@index([groupId])
   @@index([userId])
   @@map("group_members")
+}
+
+// ============================================================
+// JOIN REQUESTS
+// ============================================================
+
+model JoinRequest {
+  id        String   @id @default(uuid())
+  groupId   String   @map("group_id")
+  userId    String   @map("user_id")
+  status    String   @default("pending") @db.VarChar(20) // pending, approved, denied
+  token     String   @unique @db.VarChar(64) // for email approval links
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@index([token])
+  @@map("join_requests")
 }
 
 // ============================================================
