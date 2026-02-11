@@ -36,12 +36,13 @@ export async function GET() {
       streakRaw,
       leaderboardRaw,
       activeMembersRaw,
+      encountersTodayCount,
     ] = await Promise.all([
       // Earnings: today
       db.transaction.aggregate({
         where: {
           userId: user.id,
-          type: 'proximity_earning',
+          type: 'encounter_earning',
           amount: { gt: 0 },
           createdAt: { gte: todayStart },
         },
@@ -51,7 +52,7 @@ export async function GET() {
       db.transaction.aggregate({
         where: {
           userId: user.id,
-          type: 'proximity_earning',
+          type: 'encounter_earning',
           amount: { gt: 0 },
           createdAt: { gte: weekStart },
         },
@@ -61,7 +62,7 @@ export async function GET() {
       db.transaction.aggregate({
         where: {
           userId: user.id,
-          type: 'proximity_earning',
+          type: 'encounter_earning',
           amount: { gt: 0 },
         },
         _sum: { amount: true },
@@ -71,7 +72,7 @@ export async function GET() {
         SELECT DATE(created_at) AS day, SUM(amount) AS total
         FROM transactions
         WHERE user_id = ${user.id}
-          AND type = 'proximity_earning'
+          AND type = 'encounter_earning'
           AND amount > 0
           AND created_at >= ${weekStart}
         GROUP BY DATE(created_at)
@@ -83,7 +84,7 @@ export async function GET() {
           SELECT DISTINCT DATE(created_at) AS day
           FROM transactions
           WHERE user_id = ${user.id}
-            AND type = 'proximity_earning'
+            AND type = 'encounter_earning'
             AND amount > 0
         ),
         numbered AS (
@@ -109,7 +110,7 @@ export async function GET() {
             JOIN users u ON u.id = gm.user_id
             LEFT JOIN transactions t
               ON t.user_id = u.id
-              AND t.type = 'proximity_earning'
+              AND t.type = 'encounter_earning'
               AND t.amount > 0
             WHERE gm.group_id = ${clubId}
             GROUP BY u.id, u.name
@@ -132,6 +133,13 @@ export async function GET() {
             },
           })
         : Promise.resolve([]),
+      // Encounters today (count of credited encounters involving this user)
+      db.proximityEncounter.count({
+        where: {
+          creditedAt: { gte: todayStart },
+          OR: [{ userAId: user.id }, { userBId: user.id }],
+        },
+      }),
     ])
 
     // Build daily history array (7 days, oldest first)
@@ -181,6 +189,7 @@ export async function GET() {
         allTime: Number(allTimeSum._sum.amount ?? 0),
         dailyHistory,
       },
+      encountersToday: encountersTodayCount,
       streak: {
         days: streakDays,
         isActiveToday,

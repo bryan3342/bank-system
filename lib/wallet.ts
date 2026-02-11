@@ -1,7 +1,7 @@
 import { db } from './db'
 import { Decimal } from '@prisma/client/runtime/library'
 
-type TransactionType = 'proximity_earning' | 'event_earning' | 'stock_buy' | 'stock_sell' | 'transfer' | 'adjustment'
+type TransactionType = 'encounter_earning' | 'event_earning' | 'stock_buy' | 'stock_sell' | 'transfer' | 'adjustment'
 
 interface WalletOperationParams {
   userId: string

@@ -48,6 +48,7 @@ interface DashboardStats {
     allTime: number
     dailyHistory: number[]
   }
+  encountersToday: number
   streak: {
     days: number
     isActiveToday: boolean
@@ -67,7 +68,7 @@ interface DashboardStats {
 
 function friendlyType(type: string): string {
   const map: Record<string, string> = {
-    proximity_earning: 'Earned near friends',
+    encounter_earning: 'Encounter earning',
     event_earning: 'Earned at event',
     stock_buy: 'Stock purchase',
     stock_sell: 'Stock sale',
@@ -100,7 +101,7 @@ function Skeleton({ className = '' }: { className?: string }) {
 
 export default function DashboardPage() {
   const { data: session } = useSession()
-  const { latitude, longitude, error: geoError, isNearOthers } = useGeolocation()
+  const { latitude, longitude, error: geoError } = useGeolocation()
   const { nearbyUsers } = useNearbyUsers()
 
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -154,11 +155,6 @@ export default function DashboardPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-brand-400">Gooner Bank</h1>
-            {isNearOthers && (
-              <span className="bg-brand-500/20 text-brand-400 text-xs px-3 py-1 rounded-full border border-brand-500/30 animate-pulse">
-                Earning Grubs
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-3">
             {session?.user?.name && (
@@ -185,9 +181,6 @@ export default function DashboardPage() {
               <h2 className="text-sm font-medium text-gray-400">Nearby</h2>
               <span className="text-xs text-gray-500">
                 {nearbyUsers.length} {nearbyUsers.length === 1 ? 'person' : 'people'} nearby
-                {isNearOthers && (
-                  <span className="text-brand-400 ml-2">+2 Grubs/hr</span>
-                )}
               </span>
             </div>
             <div className="h-[350px] sm:h-[400px]">
@@ -238,7 +231,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Row 2: Earnings row */}
-          <LiveEarningRate isNearOthers={isNearOthers} />
+          <LiveEarningRate encountersToday={stats?.encountersToday ?? 0} loading={loading} />
 
           <EarningStreak
             days={stats?.streak.days ?? 0}

@@ -10,14 +10,14 @@ const locationSchema = z.object({
   longitude: z.number().min(-180).max(180),
 })
 
-const PROXIMITY_RADIUS_METERS = 300
-const PING_INTERVAL_SECONDS = 30
-const GRUBS_PER_HOUR = 2
-const GRUBS_PER_PING = (GRUBS_PER_HOUR / 3600) * PING_INTERVAL_SECONDS // ~0.01667
+const PROXIMITY_RADIUS_METERS = 200
+const MIN_ENCOUNTER_MS = 30_000 // 30 seconds minimum proximity
+const COOLDOWN_MS = 3 * 60 * 60 * 1000 // 3 hours
+const GRUBS_PER_ENCOUNTER = 2
 const ACTIVE_THRESHOLD_MS = 2 * 60 * 1000 // 2 minutes
-const MIN_PING_GAP_MS = 20 * 1000 // prevent abuse: ignore pings faster than 20s apart
+const MIN_PING_GAP_MS = 20 * 1000 // prevent abuse
 
-// POST /api/location - Update GPS + check proximity earning
+// POST /api/location - Update GPS + process encounter-based earning
 export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser()
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     const { latitude, longitude } = result.data
     const now = new Date()
 
-    // Get user's current state (including last ping time and group memberships)
+    // Get user's current state
     const currentUser = await db.user.findUnique({
       where: { id: user.id },
       select: {
@@ -54,20 +54,16 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Check if user is in any group — can't earn without a group
+    // Must be in a group to earn
     const groupIds = currentUser?.memberships.map((m) => m.groupId) ?? []
     if (groupIds.length === 0) {
-      return NextResponse.json({ success: true, isNearOthers: false })
+      return NextResponse.json({ success: true, encounters: 0 })
     }
 
-    // Rate-limit: skip earning if last ping was too recent
+    // Rate-limit pings
     const lastPing = currentUser?.lastLocationAt
     if (lastPing && now.getTime() - lastPing.getTime() < MIN_PING_GAP_MS) {
-      const userState = await db.user.findUnique({
-        where: { id: user.id },
-        select: { isNearOthers: true },
-      })
-      return NextResponse.json({ success: true, isNearOthers: userState?.isNearOthers ?? false })
+      return NextResponse.json({ success: true, encounters: 0 })
     }
 
     // Find active group members nearby
@@ -85,39 +81,93 @@ export async function POST(request: NextRequest) {
       },
       include: {
         user: {
-          select: { lastLatitude: true, lastLongitude: true },
+          select: { id: true, lastLatitude: true, lastLongitude: true },
         },
       },
     })
 
-    // Check if any group member is within 300m
-    const isNearOthers = nearbyGroupMembers.some((m) => {
-      const dist = haversineMeters(
-        latitude,
-        longitude,
-        Number(m.user.lastLatitude),
-        Number(m.user.lastLongitude)
-      )
-      return dist <= PROXIMITY_RADIUS_METERS
-    })
-
-    // Update the flag
-    await db.user.update({
-      where: { id: user.id },
-      data: { isNearOthers },
-    })
-
-    // Credit grubs if near group members
-    if (isNearOthers) {
-      await creditWallet({
-        userId: user.id,
-        amount: GRUBS_PER_PING,
-        type: 'proximity_earning',
-        description: 'Earned near friends',
+    // Filter to those within 200m
+    const nearbyUserIds = nearbyGroupMembers
+      .filter((m) => {
+        const dist = haversineMeters(
+          latitude,
+          longitude,
+          Number(m.user.lastLatitude),
+          Number(m.user.lastLongitude)
+        )
+        return dist <= PROXIMITY_RADIUS_METERS
       })
+      .map((m) => m.user.id)
+
+    // Deduplicate (a user could be in multiple shared groups)
+    const uniqueNearbyIds = [...new Set(nearbyUserIds)]
+
+    let encountersCredited = 0
+
+    for (const otherId of uniqueNearbyIds) {
+      // Normalize pair: smaller ID first
+      const [userAId, userBId] =
+        user.id < otherId ? [user.id, otherId] : [otherId, user.id]
+
+      const existing = await db.proximityEncounter.findUnique({
+        where: { userAId_userBId: { userAId, userBId } },
+      })
+
+      if (existing) {
+        if (existing.creditedAt) {
+          // Already credited — check cooldown
+          const elapsed = now.getTime() - existing.creditedAt.getTime()
+          if (elapsed < COOLDOWN_MS) {
+            // Still in cooldown, skip
+            continue
+          }
+          // Cooldown expired — reset encounter
+          await db.proximityEncounter.update({
+            where: { id: existing.id },
+            data: { firstSeenAt: now, creditedAt: null },
+          })
+        } else {
+          // Pending encounter — check if 30s have passed
+          const elapsed = now.getTime() - existing.firstSeenAt.getTime()
+          if (elapsed >= MIN_ENCOUNTER_MS) {
+            // Credit both users
+            await db.proximityEncounter.update({
+              where: { id: existing.id },
+              data: { creditedAt: now },
+            })
+
+            await Promise.all([
+              creditWallet({
+                userId: user.id,
+                amount: GRUBS_PER_ENCOUNTER,
+                type: 'encounter_earning',
+                referenceType: 'encounter',
+                referenceId: existing.id,
+                description: 'Encounter with a Cookie Club member',
+              }),
+              creditWallet({
+                userId: otherId,
+                amount: GRUBS_PER_ENCOUNTER,
+                type: 'encounter_earning',
+                referenceType: 'encounter',
+                referenceId: existing.id,
+                description: 'Encounter with a Cookie Club member',
+              }),
+            ])
+
+            encountersCredited++
+          }
+          // else: still pending, not enough time yet
+        }
+      } else {
+        // No record — create pending encounter
+        await db.proximityEncounter.create({
+          data: { userAId, userBId, firstSeenAt: now },
+        })
+      }
     }
 
-    return NextResponse.json({ success: true, isNearOthers })
+    return NextResponse.json({ success: true, encounters: encountersCredited })
   } catch (error) {
     console.error('Update location error:', error)
     return NextResponse.json(

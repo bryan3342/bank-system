@@ -24,8 +24,6 @@ model User {
   lastLatitude   Decimal?  @map("last_latitude") @db.Decimal(10, 7)
   lastLongitude  Decimal?  @map("last_longitude") @db.Decimal(10, 7)
   lastLocationAt DateTime? @map("last_location_at")
-  isNearOthers   Boolean   @default(false) @map("is_near_others")
-
   // Relations
   ownedGroups    Group[]         @relation("GroupOwner")
   memberships    GroupMember[]
@@ -33,6 +31,8 @@ model User {
   createdEvents  Event[]         @relation("EventCreator")
   checkins       EventCheckin[]
   transactions   Transaction[]
+  encountersAsA  ProximityEncounter[] @relation("EncounterUserA")
+  encountersAsB  ProximityEncounter[] @relation("EncounterUserB")
 
   @@index([lastLocationAt])
   @@map("users")
@@ -187,4 +187,22 @@ model Transaction {
   @@index([type])
   @@index([referenceType, referenceId])
   @@map("transactions")
+}
+
+// ============================================================
+// PROXIMITY ENCOUNTERS
+// ============================================================
+
+model ProximityEncounter {
+  id          String    @id @default(uuid())
+  userAId     String    @map("user_a_id")    // lexicographically smaller user ID
+  userBId     String    @map("user_b_id")    // lexicographically larger user ID
+  firstSeenAt DateTime  @map("first_seen_at")
+  creditedAt  DateTime? @map("credited_at")
+
+  userA User @relation("EncounterUserA", fields: [userAId], references: [id])
+  userB User @relation("EncounterUserB", fields: [userBId], references: [id])
+
+  @@unique([userAId, userBId])
+  @@map("proximity_encounters")
 }

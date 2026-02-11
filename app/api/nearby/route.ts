@@ -17,14 +17,13 @@ export async function GET() {
       select: {
         lastLatitude: true,
         lastLongitude: true,
-        isNearOthers: true,
       },
     })
 
     if (!self?.lastLatitude || !self?.lastLongitude) {
       return NextResponse.json({
         users: [],
-        self: { isNearOthers: false, latitude: null, longitude: null },
+        self: { latitude: null, longitude: null },
       })
     }
 
@@ -55,7 +54,6 @@ export async function GET() {
         lastSeen: u.lastLocationAt!.toISOString(),
       })),
       self: {
-        isNearOthers: self.isNearOthers,
         latitude: Number(self.lastLatitude),
         longitude: Number(self.lastLongitude),
       },

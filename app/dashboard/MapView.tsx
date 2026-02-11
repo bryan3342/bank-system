@@ -57,9 +57,9 @@ export default function MapView({ center, nearbyUsers, geoError }: MapViewProps)
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
     }).addTo(map)
 
-    // 300m earning radius circle
+    // 200m encounter radius circle
     circleRef.current = L.circle(center, {
-      radius: 300,
+      radius: 200,
       color: '#4ade80',
       fillColor: '#4ade80',
       fillOpacity: 0.05,

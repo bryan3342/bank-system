@@ -6,7 +6,6 @@ interface GeolocationState {
   latitude: number | null
   longitude: number | null
   error: string | null
-  isNearOthers: boolean
 }
 
 const PING_INTERVAL_MS = 30_000 // 30 seconds
@@ -16,22 +15,17 @@ export function useGeolocation(): GeolocationState {
     latitude: null,
     longitude: null,
     error: null,
-    isNearOthers: false,
   })
   const watchIdRef = useRef<number | null>(null)
   const latestCoordsRef = useRef<{ lat: number; lon: number } | null>(null)
 
   const reportLocation = useCallback(async (lat: number, lon: number) => {
     try {
-      const res = await fetch('/api/location', {
+      await fetch('/api/location', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ latitude: lat, longitude: lon }),
       })
-      if (res.ok) {
-        const data = await res.json()
-        setState((prev) => ({ ...prev, isNearOthers: data.isNearOthers }))
-      }
     } catch {
       // Silently fail — map still works without server ping
     }
