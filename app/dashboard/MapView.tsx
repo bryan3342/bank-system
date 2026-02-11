@@ -50,6 +50,7 @@ export default function MapView({ center, nearbyUsers, geoError }: MapViewProps)
       center,
       zoom: 16,
       zoomControl: false,
+      attributionControl: false,
     })
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
